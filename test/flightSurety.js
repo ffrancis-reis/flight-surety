@@ -1,3 +1,5 @@
+const web3Utils = require("web3-utils");
+
 var Test = require("../config/testConfig.js");
 var BigNumber = require("bignumber.js");
 
@@ -11,6 +13,8 @@ contract("Flight Surety Tests", async (accounts) => {
       config.flightSuretyApp.address
     );
     await config.flightSuretyData.authorizeContract(config.firstAirline);
+    await config.flightSuretyData.authorizeContract(config.testAddresses[6]); // fifithAirline
+    await config.flightSuretyData.authorizeContract(config.testAddresses[7]); // client
   });
 
   /****************************************************************************************/
@@ -22,20 +26,6 @@ contract("Flight Surety Tests", async (accounts) => {
     let status = await config.flightSuretyData.isOperational.call();
 
     assert.equal(status, true, "Incorrect initial operating status value");
-  });
-
-  it("CANNOT see isOperational from data", async function () {
-    let accessDenied = false;
-
-    try {
-      await config.flightSuretyData.isOperational.call({
-        from: config.testAddresses[8],
-      });
-    } catch (e) {
-      accessDenied = true;
-    }
-
-    assert.equal(accessDenied, true, "CAN see isOperational from data");
   });
 
   it(`(multiparty) can block access to setOperatingStatus() for non-Contract Owner account`, async function () {
@@ -108,6 +98,20 @@ contract("Flight Surety Tests", async (accounts) => {
       false,
       "Airline should not be able to register another airline if it hasn't provided funding"
     );
+  });
+
+  it("(data - operation) CANNOT see isOperational from data", async function () {
+    let accessDenied = false;
+
+    try {
+      await config.flightSuretyData.isOperational.call({
+        from: config.testAddresses[8],
+      });
+    } catch (e) {
+      accessDenied = true;
+    }
+
+    assert.equal(accessDenied, true, "CAN see isOperational from data");
   });
 
   // it("(app - airline) CANNOT register airline if not contract owner", async () => {
@@ -210,7 +214,6 @@ contract("Flight Surety Tests", async (accounts) => {
     assert.equal(newAirline[1], true, "wrong airline isRegistered");
     assert.equal(newAirline[2], false, "wrong airline isFunded");
     assert.equal(newAirline[3], 0, "wrong airline balance");
-
     assert.equal(airlinesRegistered, 2, "wrong number of airlines registered");
   });
 
@@ -284,13 +287,12 @@ contract("Flight Surety Tests", async (accounts) => {
 
     assert.equal(airlineVotes[0], config.owner, "wrong airline voter address");
     assert.equal(
-      airlineVotes[1],
-      config.testAddresses[5],
+      airlineVotes[1].toLowerCase(),
+      config.testAddresses[5].toLowerCase(),
       "wrong airline voter address"
     );
     assert.equal(airlineVotes.length, 2, "wrong number of votes");
     assert.equal(airlinesRegistered, 5, "wrong number of airlines registered");
-
     assert.equal(newAirline[0], newAirlineName, "wrong airline name");
     assert.equal(newAirline[1], true, "wrong airline isRegistered");
     assert.equal(newAirline[2], false, "wrong airline isFunded");
@@ -352,6 +354,325 @@ contract("Flight Surety Tests", async (accounts) => {
       balance,
       config.weiMultiple * 10,
       "wrong contract total balance"
+    );
+  });
+
+  it("(app - flight) CAN register flight", async () => {
+    let newFlightNumber = web3Utils.utf8ToHex("LFT568");
+    let newFlightTime = 0800;
+    let fifthAirline = config.testAddresses[6];
+
+    await config.flightSuretyApp.registerFlight(
+      newFlightNumber,
+      newFlightTime,
+      { from: fifthAirline }
+    );
+
+    let newFlight = await config.flightSuretyData.getFlight.call(
+      newFlightNumber,
+      { from: fifthAirline }
+    );
+    let flightsRegistered = await config.flightSuretyData.getFlightsRegistered({
+      from: config.firstAirline,
+    });
+
+    // assert.equal(
+    //   web3Utils.hexToUtf8(newFlight[0]),
+    //   "LFT568",
+    //   "wrong flight number"
+    // );
+    assert.equal(newFlight[0], true, "wrong flight isRegistered");
+    assert.equal(Number(newFlight[1]), 0, "wrong flight statusCode");
+    assert.equal(Number(newFlight[2]), 0800, "wrong flight updatedTimestamp");
+    assert.equal(
+      newFlight[3].toLowerCase(),
+      fifthAirline.toLowerCase(),
+      "wrong flight airline address"
+    );
+    assert.equal(
+      flightsRegistered.length,
+      1,
+      "wrong number of flights registered"
+    );
+    assert.equal(
+      flightsRegistered[0],
+      newFlight[4],
+      "wrong flight key registered"
+    );
+  });
+
+  it("(app - flight) CANNOT register flight if already registered", async () => {
+    let newFlightNumber = web3Utils.utf8ToHex("LFT568");
+    let newFlightTime = 0800;
+    let fifthAirline = config.testAddresses[6];
+
+    let reverted = false;
+
+    try {
+      await config.flightSuretyApp.registerFlight(
+        newFlightNumber,
+        newFlightTime,
+        { from: fifthAirline }
+      );
+    } catch (e) {
+      reverted = true;
+    }
+
+    let newFlight = await config.flightSuretyData.getFlight.call(
+      newFlightNumber,
+      { from: fifthAirline }
+    );
+    let flightsRegistered = await config.flightSuretyData.getFlightsRegistered({
+      from: config.firstAirline,
+    });
+
+    assert.equal(reverted, true, "could register flight if already registered");
+    assert.equal(
+      flightsRegistered.length,
+      1,
+      "wrong number of flights registered"
+    );
+    assert.equal(
+      flightsRegistered[0],
+      newFlight[4],
+      "wrong flight key registered"
+    );
+  });
+
+  it("(app - insurance) CAN buy insurance for a flight", async () => {
+    let flightNumber = web3Utils.utf8ToHex("LFT568");
+    let client = config.testAddresses[7];
+    let fifthAirline = config.testAddresses[6];
+
+    await config.flightSuretyApp.buyInsurance(flightNumber, {
+      from: client,
+      value: config.weiMultiple * 1,
+    });
+
+    let flight = await config.flightSuretyData.getFlight.call(flightNumber, {
+      from: fifthAirline,
+    });
+    let flightInsurances = await config.flightSuretyData.getFlightInsurances(
+      flight[4],
+      { from: fifthAirline }
+    );
+    let newInsurance = await config.flightSuretyData.getInsurance.call(
+      flightInsurances[0],
+      { from: fifthAirline }
+    );
+    let balance = await web3.eth.getBalance(config.flightSuretyData.address);
+
+    assert.equal(
+      newInsurance[0].toLowerCase(),
+      client.toLowerCase(),
+      "wrong insurance client"
+    );
+    assert.equal(
+      Number(newInsurance[1]),
+      config.weiMultiple * 1,
+      "wrong insurance value"
+    );
+    assert.equal(newInsurance[2], false, "wrong insurance isPayed");
+    assert.equal(Number(newInsurance[3]), 0, "wrong insurance balance");
+    assert.equal(
+      balance,
+      config.weiMultiple * 11,
+      "wrong contract total balance"
+    );
+    assert.equal(
+      flightInsurances.length,
+      1,
+      "wrong number of flight insurances registered"
+    );
+  });
+
+  it("(app - insurance) CANNOT buy insurance for an unregistered flight", async () => {
+    let flightNumber = web3Utils.utf8ToHex("LFT523");
+    let registeredFlightNumber = web3Utils.utf8ToHex("LFT568");
+    let client = config.testAddresses[7];
+    let fifthAirline = config.testAddresses[6];
+
+    let reverted = false;
+
+    try {
+      await config.flightSuretyApp.buyInsurance(flightNumber, {
+        from: client,
+        value: config.weiMultiple * 1,
+      });
+    } catch (e) {
+      reverted = true;
+    }
+
+    let flight = await config.flightSuretyData.getFlight.call(
+      registeredFlightNumber,
+      {
+        from: fifthAirline,
+      }
+    );
+    let flightInsurances = await config.flightSuretyData.getFlightInsurances(
+      flight[4],
+      { from: fifthAirline }
+    );
+    let balance = await web3.eth.getBalance(config.flightSuretyData.address);
+
+    assert.equal(
+      reverted,
+      true,
+      "could buy insurance for an unregistered flight"
+    );
+    assert.equal(
+      balance,
+      config.weiMultiple * 11,
+      "wrong contract total balance"
+    );
+    assert.equal(
+      flightInsurances.length,
+      1,
+      "wrong number of flight insurances registered"
+    );
+  });
+
+  it("(app - insurance) CANNOT buy insurance if client already insured", async () => {
+    let registeredFlightNumber = web3Utils.utf8ToHex("LFT568");
+    let insuredClient = config.testAddresses[7];
+    let fifthAirline = config.testAddresses[6];
+
+    let reverted = false;
+
+    try {
+      await config.flightSuretyApp.buyInsurance(registeredFlightNumber, {
+        from: insuredClient,
+        value: config.weiMultiple * 1,
+      });
+    } catch (e) {
+      reverted = true;
+    }
+
+    let flight = await config.flightSuretyData.getFlight.call(
+      registeredFlightNumber,
+      {
+        from: fifthAirline,
+      }
+    );
+    let flightInsurances = await config.flightSuretyData.getFlightInsurances(
+      flight[4],
+      { from: fifthAirline }
+    );
+    let balance = await web3.eth.getBalance(config.flightSuretyData.address);
+
+    assert.equal(
+      reverted,
+      true,
+      "could buy insurance if client already insured"
+    );
+    assert.equal(
+      balance,
+      config.weiMultiple * 11,
+      "wrong contract total balance"
+    );
+    assert.equal(
+      flightInsurances.length,
+      1,
+      "wrong number of flight insurances registered"
+    );
+  });
+
+  it("(app - insurance) CANNOT buy insurance with more than maximum value allowed", async () => {
+    let registeredFlightNumber = web3Utils.utf8ToHex("LFT568");
+    let insuredClient = config.testAddresses[7];
+    let fifthAirline = config.testAddresses[6];
+
+    let reverted = false;
+
+    try {
+      await config.flightSuretyApp.buyInsurance(registeredFlightNumber, {
+        from: insuredClient,
+        value: config.weiMultiple * 3,
+      });
+    } catch (e) {
+      reverted = true;
+    }
+
+    let flight = await config.flightSuretyData.getFlight.call(
+      registeredFlightNumber,
+      {
+        from: fifthAirline,
+      }
+    );
+    let flightInsurances = await config.flightSuretyData.getFlightInsurances(
+      flight[4],
+      { from: fifthAirline }
+    );
+    let balance = await web3.eth.getBalance(config.flightSuretyData.address);
+
+    // console.log(flight);
+    // console.log(flightInsurances);
+    // console.log(balance);
+
+    assert.equal(
+      reverted,
+      true,
+      "could buy insurance with more than maximum value allowed"
+    );
+    assert.equal(
+      balance,
+      config.weiMultiple * 11,
+      "wrong contract total balance"
+    );
+    assert.equal(
+      flightInsurances.length,
+      1,
+      "wrong number of flight insurances registered"
+    );
+  });
+
+  it("(app - insurance) CAN buy insurance for a flight to another client", async () => {
+    let registeredFlightNumber = web3Utils.utf8ToHex("LFT568");
+    let newClient = config.testAddresses[8];
+    let fifthAirline = config.testAddresses[6];
+
+    await config.flightSuretyApp.buyInsurance(registeredFlightNumber, {
+      from: newClient,
+      value: config.weiMultiple * 1,
+    });
+
+    let flight = await config.flightSuretyData.getFlight.call(
+      registeredFlightNumber,
+      {
+        from: fifthAirline,
+      }
+    );
+    let flightInsurances = await config.flightSuretyData.getFlightInsurances(
+      flight[4],
+      { from: fifthAirline }
+    );
+    let newInsurance = await config.flightSuretyData.getInsurance.call(
+      flightInsurances[1],
+      { from: fifthAirline }
+    );
+    let balance = await web3.eth.getBalance(config.flightSuretyData.address);
+
+    assert.equal(
+      newInsurance[0].toLowerCase(),
+      newClient.toLowerCase(),
+      "wrong insurance client"
+    );
+    assert.equal(
+      Number(newInsurance[1]),
+      config.weiMultiple * 1,
+      "wrong insurance value"
+    );
+    assert.equal(newInsurance[2], false, "wrong insurance isPayed");
+    assert.equal(Number(newInsurance[3]), 0, "wrong insurance balance");
+    assert.equal(
+      balance,
+      config.weiMultiple * 12,
+      "wrong contract total balance"
+    );
+    assert.equal(
+      flightInsurances.length,
+      2,
+      "wrong number of flight insurances registered"
     );
   });
 });

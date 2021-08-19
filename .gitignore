@@ -65,3 +65,4 @@ typings/
 
 ~$*.pptx
 /.secret
+/yarn.lock
