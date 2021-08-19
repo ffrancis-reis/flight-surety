@@ -30,6 +30,7 @@ contract FlightSuretyApp {
     uint256 private constant AIRLINE_CONSENSUS_VOTES = 50; // percentage %
     uint256 private constant AIRLINE_MINIMUM_FEE = 10 ether;
     uint256 private constant FLIGHT_MAX_INSURANCE = 1 ether;
+    uint256 private constant CLIENT_INSURANCE_ADDITION = 5;
 
     address private contractOwner;
     mapping(address => address[]) private airlineVotes;
@@ -192,46 +193,14 @@ contract FlightSuretyApp {
         return airlineVotes[_airlineAddress];
     }
 
-    // function getFlight(bytes32 _flightNumber)
-    //     external
-    //     view
-    //     requireIsOperational
-    //     returns (
-    //         bool,
-    //         uint8,
-    //         uint256,
-    //         address,
-    //         bytes32
-    //     )
-    // {
-    //     bool _isRegistered;
-    //     uint8 _statusCode;
-    //     uint256 _updatedTimestamp;
-    //     address _airline;
-    //     bytes32 _flightKey;
-
-    //     (
-    //         _isRegistered,
-    //         _statusCode,
-    //         _updatedTimestamp,
-    //         _airline,
-    //         _flightKey
-    //     ) = flightSuretyData.getFlight(_flightNumber);
-
-    //     return (
-    //         _isRegistered,
-    //         _statusCode,
-    //         _updatedTimestamp,
-    //         _airline,
-    //         _flightKey
-    //     );
-    // }
-
     /********************************************************************************************/
     /*                                     SMART CONTRACT FUNCTIONS                             */
     /********************************************************************************************/
 
-    function voteForAirline(address _airlineAddress) private {
+    function voteForAirline(address _airlineAddress)
+        private
+        requireIsOperational
+    {
         bool isDuplicateVote = false;
 
         for (
@@ -363,6 +332,32 @@ contract FlightSuretyApp {
         emit InsuranceBuyed(msg.sender, _flightNumber, msg.value);
     }
 
+    function getTotalBalance(bytes32 _flightKey)
+        private
+        view
+        requireIsOperational
+        returns (uint256)
+    {
+        uint256 _totalBalance = 0;
+        bytes32[] memory _insurancesKeys = flightSuretyData.getFlightInsurances(
+            _flightKey
+        );
+
+        for (uint256 index = 0; index < _insurancesKeys.length; index++) {
+            bool _isPayed;
+            uint256 _value;
+            (, _value, _isPayed, ) = flightSuretyData.getInsurance(
+                _insurancesKeys[index]
+            );
+
+            if (_isPayed == true) {
+                _totalBalance = _totalBalance.add(_value);
+            }
+        }
+
+        return _totalBalance;
+    }
+
     /**
      * @dev Called after oracle has updated flight status
      *
@@ -382,15 +377,17 @@ contract FlightSuretyApp {
             bytes32 _flightKey = keccak256(
                 abi.encodePacked(_airlineAddress, _flightNumber, _flightTime)
             );
-            // uint256 boughtInsurance = flightSuretyData.getEstimativeCreditingCost(
-            //     _flightKey
-            // );
-            // uint8 multiplier = getInsuranceMultiplier(
-            //     _airlineBalance,
-            //     boughtInsurance
-            // );
+            uint256 _totalBalance = getTotalBalance(_flightKey);
 
-            // flightSuretyData.creditInsurees(_flightKey, multiplier);
+            uint256 _addition = CLIENT_INSURANCE_ADDITION;
+            uint256 _creditBalance = _totalBalance.mul(_addition).div(10);
+            while (_airlineBalance <= _creditBalance && _addition > 0) {
+                _addition--;
+                _creditBalance = _totalBalance.mul(_addition).div(10);
+            }
+
+            flightSuretyData.creditInsurees(_flightKey, _addition);
+
             flightSuretyData.setFlightStatus(
                 _flightKey,
                 STATUS_CODE_LATE_AIRLINE
@@ -668,6 +665,14 @@ contract FlightSuretyData {
         address _clientAddress,
         uint256 _clientAmount
     ) external payable;
+
+    function getFlightInsurances(bytes32 _flightKey)
+        external
+        view
+        returns (bytes32[]);
+
+    function creditInsurees(bytes32 _flightKey, uint256 _insuranceValue)
+        external;
 
     function setFlightStatus(bytes32 _flightKey, uint8 _statusCode) external;
 }

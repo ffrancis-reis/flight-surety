@@ -10,8 +10,6 @@ contract FlightSuretyData {
     /*                                       DATA VARIABLES                                     */
     /********************************************************************************************/
 
-    uint256 private constant AIRLINE_MINIMUM_FEE = 10 ether;
-
     bool private operational = true; // Blocks all state changes throughout the contract if false
     address private contractOwner; // Account used to deploy contract
     mapping(address => bool) private authorizedContracts;
@@ -365,16 +363,29 @@ contract FlightSuretyData {
     /**
      *  @dev Credits payouts to insurees
      */
-    function creditInsurees(
-        bytes32 _flightKey,
-        address _clientAddress,
-        uint256 _value
-    ) private requireIsOperational requireIsAuthorized {
-        bytes32 _insuranceKey = getKeyEncoded(_clientAddress, _flightKey, 0);
-        insurances[_insuranceKey].balance = insurances[_insuranceKey]
-            .balance
-            .add(_value);
-        insurances[_insuranceKey].isPayed = true;
+    function creditInsurees(bytes32 _flightKey, uint256 _insuranceValue)
+        external
+        requireIsOperational
+        requireIsAuthorized
+    {
+        address _airlineAddress = flights[_flightKey].airline;
+        bytes32[] memory _insurancesKeys = flightInsurances[_flightKey];
+
+        for (uint256 index = 0; index < _insurancesKeys.length; index++) {
+            Insurance memory _insurance = insurances[_insurancesKeys[index]];
+
+            if (_insurance.isPayed == false) {
+                uint256 _value = _insurance.value.mul(_insuranceValue);
+
+                _insurance.isPayed = true;
+                _insurance.balance = _insurance.balance.add(_value);
+
+                airlines[_airlineAddress].balance = airlines[_airlineAddress]
+                    .balance
+                    .sub(_value)
+                    .sub(_insurance.value);
+            }
+        }
     }
 
     /**
